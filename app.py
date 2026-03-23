@@ -4,9 +4,10 @@ import requests
 import json
 
 # -----------------------------------------------------------------------------
-# [Security Gate] V1.8
-# 升級重點：平台選擇改為卡片式點選（支援未來擴充）
-# 使用 st.session_state + HTML/CSS 卡片 + st.radio hidden 實作
+# [Security Gate] V1.9
+# 修正：
+# 1. 平台選擇改用 st.button 純按鈕，透過 CSS 完整偽裝成卡片，上下合一
+# 2. 輸入框改為白色背景，與頁面底色明顯區隔
 # -----------------------------------------------------------------------------
 
 # ==========================================
@@ -34,7 +35,7 @@ PROMO_BLACKLIST = ["熱銷", "下殺", "贈送", "免運", "折扣", "特價", "
 PLATFORM_CONFIG = {
     "Shopee 蝦皮": {
         "color":     "#EE4D2D",
-        "color_dim": "rgba(238,77,45,0.12)",
+        "color_dim": "rgba(238,77,45,0.13)",
         "emoji":     "🛍️",
         "short":     "蝦皮",
         "desc":      "長標題・長尾關鍵字",
@@ -43,7 +44,7 @@ PLATFORM_CONFIG = {
     },
     "Momo 購物網": {
         "color":     "#C8001E",
-        "color_dim": "rgba(200,0,30,0.10)",
+        "color_dim": "rgba(200,0,30,0.11)",
         "emoji":     "🏪",
         "short":     "Momo",
         "desc":      "60字上限・禁促銷",
@@ -52,7 +53,7 @@ PLATFORM_CONFIG = {
     },
     "Yahoo 奇摩": {
         "color":     "#6E1FBD",
-        "color_dim": "rgba(110,31,189,0.10)",
+        "color_dim": "rgba(110,31,189,0.11)",
         "emoji":     "🔶",
         "short":     "Yahoo",
         "desc":      "24字上限・極致壓縮",
@@ -62,7 +63,7 @@ PLATFORM_CONFIG = {
     # ── 未來新增平台範例（取消註解即啟用）──
     # "露天拍賣": {
     #     "color":     "#E87722",
-    #     "color_dim": "rgba(232,119,34,0.10)",
+    #     "color_dim": "rgba(232,119,34,0.11)",
     #     "emoji":     "🏷️",
     #     "short":     "露天",
     #     "desc":      "50字上限・拍賣風格",
@@ -148,8 +149,8 @@ def clean_parts(parts, sep=" | "):
 
 def generate_shopee_titles(brand, model, specs, promo):
     tag = f"[{promo[:5]}]" if promo else ""
-    ts = translate_specs(specs)
-    ss = clean_parts(ts)
+    ts  = translate_specs(specs)
+    ss  = clean_parts(ts)
     return {
         "🛡️ 標準公版（品牌識別優先）": clean_parts([tag, brand, model, ss, "馬尼通訊"]),
         "💡 痛點先決（長尾命中優先）": clean_parts([tag, ss, f"{brand} {model}", "馬尼通訊"]),
@@ -170,7 +171,7 @@ def generate_momo_titles(brand, model, specs):
     return {k: v[:57] + "..." if len(v) > 60 else v for k, v in titles.items()}
 
 def generate_yahoo_titles(brand, model, promo, specs):
-    ts = translate_specs(specs)
+    ts  = translate_specs(specs)
     top = ts[0] if ts else ""
     def compress(t): return t.replace(" ", "").replace("|", "")
     def cap(t): return t[:24] if len(t) > 24 else t
@@ -180,14 +181,14 @@ def generate_yahoo_titles(brand, model, promo, specs):
         "⚙️ 規格直擊（功能導向）": cap(compress(f"{brand}{model}{top}")),
     }
 
-def generate_titles_by_platform(platform, brand, model, specs, promo):
-    key_specs = [s.strip() for s in specs.split(",")] if specs else []
+def generate_titles_by_platform(platform, brand, model, specs_str, promo):
+    specs = [s.strip() for s in specs_str.split(",")] if specs_str else []
     if platform == "Shopee 蝦皮":
-        return generate_shopee_titles(brand, model, key_specs, promo)
+        return generate_shopee_titles(brand, model, specs, promo)
     elif platform == "Momo 購物網":
-        return generate_momo_titles(brand, model, key_specs)
+        return generate_momo_titles(brand, model, specs)
     else:
-        return generate_yahoo_titles(brand, model, promo, key_specs)
+        return generate_yahoo_titles(brand, model, promo, specs)
 
 # ==========================================
 # 4. AI 引擎
@@ -238,24 +239,21 @@ def get_gemini_suggestions(platform, brand, model, specs, promo,
 # ==========================================
 # 5. Session State
 # ==========================================
-_ss_defaults = {
+_ss = {
     "has_run":       False,
     "rule_results":  None,
     "ai_results":    None,
     "use_ai":        True,
     "last_platform": None,
-    "sel_platform":  "Shopee 蝦皮",   # 平台卡片選擇
+    "sel_platform":  "Shopee 蝦皮",
 }
-for k, v in _ss_defaults.items():
+for k, v in _ss.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 for f in ["f_brand","f_model","f_specs","f_promo","f_selling","f_audience","f_seo"]:
     if f not in st.session_state:
         st.session_state[f] = ""
-
-def select_platform(name: str):
-    st.session_state.sel_platform = name
 
 def apply_template():
     tmpl = HOT_TEMPLATES.get(st.session_state.template_selector)
@@ -274,7 +272,7 @@ def apply_template():
             st.session_state[f] = ""
 
 # ==========================================
-# 6. 全域 CSS
+# 6. CSS 注入
 # ==========================================
 def inject_css(pc: str, pd: str):
     st.markdown(f"""
@@ -282,14 +280,14 @@ def inject_css(pc: str, pd: str):
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap');
 
 html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important; }}
-.stApp {{ background: #f2f2f5; }}
+.stApp {{ background: #f0f0f3; }}
 
-/* ── 頂部色條 ── */
+/* ── 頂部平台色條 ── */
 .top-stripe {{
     height: 4px;
-    background: linear-gradient(90deg, {pc}, {pc}66);
+    background: linear-gradient(90deg, {pc}, {pc}55);
     border-radius: 2px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
 }}
 
 /* ── 頁面標題 ── */
@@ -297,89 +295,12 @@ html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important
     font-size: 22px;
     font-weight: 700;
     color: #1a1a2e;
-    margin: 0 0 2px;
-    line-height: 1.3;
+    margin: 0 0 3px;
 }}
 .page-sub {{
     font-size: 12px;
-    color: #999;
-    margin-bottom: 20px;
-}}
-
-/* ── 平台卡片群組 ── */
-.platform-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 10px;
-    margin-bottom: 20px;
-}}
-.platform-card {{
-    background: #fff;
-    border: 2px solid #e5e5ea;
-    border-radius: 12px;
-    padding: 14px 10px 12px;
-    cursor: pointer;
-    text-align: center;
-    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
-    user-select: none;
-}}
-.platform-card:hover {{
-    border-color: #ccc;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-    transform: translateY(-1px);
-}}
-.platform-card.active {{
-    border-color: {pc};
-    box-shadow: 0 4px 18px {pd};
-    background: #fff;
-}}
-.platform-card.active .pc-name {{
-    color: {pc};
-}}
-.platform-card.active .pc-check {{
-    opacity: 1;
-    background: {pc};
-}}
-.pc-emoji {{ font-size: 24px; margin-bottom: 6px; display: block; }}
-.pc-name {{
-    font-size: 14px;
-    font-weight: 700;
-    color: #333;
-    display: block;
-    margin-bottom: 3px;
-    transition: color 0.18s;
-}}
-.pc-desc {{
-    font-size: 10px;
     color: #aaa;
-    display: block;
-    line-height: 1.4;
-}}
-.pc-check {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px; height: 18px;
-    border-radius: 50%;
-    background: #e5e5ea;
-    color: #fff;
-    font-size: 10px;
-    margin-top: 8px;
-    opacity: 0;
-    transition: opacity 0.18s, background 0.18s;
-}}
-.platform-card.active .pc-check {{ opacity: 1; }}
-
-/* ── Momo 促銷警示條 ── */
-.momo-warn {{
-    background: rgba(200,0,30,0.07);
-    border: 1px solid rgba(200,0,30,0.2);
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 12px;
-    color: #a0001a;
-    margin-bottom: 8px;
-    font-weight: 500;
+    margin-bottom: 22px;
 }}
 
 /* ── Section 標題 ── */
@@ -394,7 +315,7 @@ html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important
     text-transform: uppercase;
     margin: 20px 0 10px;
     padding-bottom: 8px;
-    border-bottom: 1px solid #e8e8ed;
+    border-bottom: 1px solid #e0e0e6;
 }}
 .sec-dot {{
     width: 7px; height: 7px;
@@ -404,10 +325,123 @@ html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important
 }}
 .sec-dot.purple {{ background: #8b5cf6; }}
 
+/* ══════════════════════════════════════════
+   平台卡片：用 st.button 完整偽裝
+   ──────────────────────────────────────────
+   原理：把 Streamlit button 的所有原生樣式
+   全部清掉，改成卡片外觀。
+   按鈕本身就是整張卡片，點哪裡都能觸發。
+   ══════════════════════════════════════════ */
+
+/* 外層 column 之間的間距 */
+[data-testid="column"] {{
+    padding: 0 5px !important;
+}}
+[data-testid="column"]:first-child {{ padding-left: 0 !important; }}
+[data-testid="column"]:last-child  {{ padding-right: 0 !important; }}
+
+/* 按鈕容器撐滿欄位 */
+[data-testid="stButton"] {{
+    width: 100%;
+}}
+
+/* ── 非選中狀態 ── */
+[data-testid="stButton"] > button {{
+    width: 100% !important;
+    min-height: 110px !important;
+    background: #ffffff !important;
+    border: 2px solid #e0e0e6 !important;
+    border-radius: 14px !important;
+    color: #333 !important;
+    font-family: 'Noto Sans TC', sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    padding: 14px 10px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s !important;
+    white-space: pre-line !important;
+    line-height: 1.5 !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+}}
+[data-testid="stButton"] > button:hover {{
+    border-color: #bbb !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.09) !important;
+    transform: translateY(-2px) !important;
+    color: #111 !important;
+    background: #fff !important;
+}}
+
+/* ── 選中的卡片（用 .active-platform class 在按鈕父層標記）── */
+.active-platform [data-testid="stButton"] > button {{
+    border-color: {pc} !important;
+    box-shadow: 0 4px 20px {pd} !important;
+    background: #fff !important;
+    color: {pc} !important;
+    transform: translateY(-2px) !important;
+}}
+.active-platform [data-testid="stButton"] > button:hover {{
+    border-color: {pc} !important;
+}}
+
+/* ── Momo 促銷警示 ── */
+.momo-warn {{
+    background: rgba(200,0,30,0.07);
+    border: 1px solid rgba(200,0,30,0.22);
+    border-radius: 8px;
+    padding: 9px 13px;
+    font-size: 12px;
+    color: #a0001a;
+    margin-bottom: 10px;
+    font-weight: 500;
+}}
+
+/* ── 輸入框：白色背景，與頁面底色明顯區隔 ── */
+.stTextInput > div > div > input {{
+    background: #ffffff !important;
+    border: 1.5px solid #d8d8e0 !important;
+    border-radius: 8px !important;
+    color: #1a1a2e !important;
+    font-size: 13px !important;
+    padding: 8px 11px !important;
+}}
+.stTextInput > div > div > input:focus {{
+    border-color: {pc} !important;
+    box-shadow: 0 0 0 3px {pd} !important;
+    background: #ffffff !important;
+}}
+.stTextInput > div > div > input::placeholder {{ color: #bbb !important; }}
+
+/* textarea 白色背景 */
+.stTextArea textarea {{
+    background: #ffffff !important;
+    border: 1.5px solid #d8d8e0 !important;
+    border-radius: 8px !important;
+    color: #1a1a2e !important;
+    font-size: 13px !important;
+}}
+.stTextArea textarea:focus {{
+    border-color: {pc} !important;
+    box-shadow: 0 0 0 3px {pd} !important;
+    background: #ffffff !important;
+}}
+.stTextArea textarea::placeholder {{ color: #bbb !important; }}
+
+/* selectbox 白色背景 */
+[data-baseweb="select"] > div {{
+    background: #ffffff !important;
+    border: 1.5px solid #d8d8e0 !important;
+    border-radius: 8px !important;
+}}
+
 /* ── 標題結果卡片 ── */
 .title-card {{
-    background: #fff;
-    border: 1px solid #e8e8ed;
+    background: #ffffff;
+    border: 1px solid #e0e0e6;
     border-left: 4px solid {pc};
     border-radius: 10px;
     padding: 12px 15px 10px;
@@ -448,12 +482,12 @@ html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important
 .reason {{
     font-size: 12px;
     color: #888;
-    border-left: 2px solid #e8e8ed;
+    border-left: 2px solid #e0e0e6;
     padding-left: 9px;
     margin-top: 5px;
     line-height: 1.5;
 }}
-.reason.ai {{ border-color: #8b5cf6; color: #7c3aed; }}
+.reason.ai {{ border-color:#8b5cf6; color:#7c3aed; }}
 
 /* ── 訊息框 ── */
 .msg {{
@@ -463,31 +497,18 @@ html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important
     margin-bottom: 10px;
     line-height: 1.5;
 }}
-.msg.error {{ background:rgba(220,38,38,0.07); border:1px solid rgba(220,38,38,0.2); color:#b91c1c; }}
-.msg.warn  {{ background:rgba(217,119,6,0.07);  border:1px solid rgba(217,119,6,0.2);  color:#92400e; }}
+.msg.error {{ background:rgba(220,38,38,0.07); border:1px solid rgba(220,38,38,0.22); color:#b91c1c; }}
+.msg.warn  {{ background:rgba(217,119,6,0.07);  border:1px solid rgba(217,119,6,0.22);  color:#92400e; }}
 .msg.info  {{ background:{pd};                  border:1px solid {pc}44;               color:{pc};    }}
 
-/* ── textarea 字型 ── */
-.stTextArea textarea {{
+/* ── 結果區 textarea（JetBrains Mono）── */
+.result-area .stTextArea textarea {{
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 13px !important;
-    border-radius: 6px !important;
-    background: #f8f8fa !important;
-    color: #1a1a2e !important;
     line-height: 1.55 !important;
 }}
-.stTextArea textarea:focus {{
-    border-color: {pc} !important;
-    box-shadow: 0 0 0 3px {pd} !important;
-}}
 
-/* ── input focus ── */
-.stTextInput > div > div > input:focus {{
-    border-color: {pc} !important;
-    box-shadow: 0 0 0 2px {pd} !important;
-}}
-
-/* ── 執行按鈕 ── */
+/* ── 執行按鈕（form submit）── */
 .stFormSubmitButton > button {{
     background: {pc} !important;
     color: #fff !important;
@@ -500,8 +521,15 @@ html, body, [class*="css"] {{ font-family: 'Noto Sans TC', sans-serif !important
     box-shadow: 0 4px 16px {pd} !important;
     transition: opacity 0.15s, transform 0.1s !important;
     width: 100% !important;
+    min-height: unset !important;      /* 覆蓋卡片按鈕的 min-height */
+    flex-direction: row !important;
 }}
-.stFormSubmitButton > button:hover {{ opacity: 0.87 !important; }}
+.stFormSubmitButton > button:hover {{
+    opacity: 0.87 !important;
+    transform: none !important;
+    border-color: transparent !important;
+    color: #fff !important;
+}}
 .stFormSubmitButton > button:active {{ transform: scale(0.98) !important; }}
 
 /* ── checkbox ── */
@@ -521,18 +549,18 @@ def get_badge_cls(count: int, limit) -> str:
 
 def render_card(strategy: str, title: str, limit, reason: str = "",
                 is_ai: bool = False, key_suffix: str = ""):
-    count = len(title.replace("...", ""))
+    count     = len(title.replace("...", ""))
     badge_cls = get_badge_cls(count, limit)
-    limit_str = f" / {limit}" if limit else ""
-    ai_cls  = "ai" if is_ai else ""
-    r_cls   = "ai" if is_ai else ""
+    lim_str   = f" / {limit}" if limit else ""
+    ai_cls    = "ai" if is_ai else ""
+    r_cls     = "ai" if is_ai else ""
     reason_html = f'<div class="reason {r_cls}">{reason}</div>' if reason else ""
 
     st.markdown(f"""
 <div class="title-card {ai_cls}">
   <div class="card-row">
     <span class="card-strategy">{strategy}</span>
-    <span class="cbadge {badge_cls}">{count}{limit_str} 字元</span>
+    <span class="cbadge {badge_cls}">{count}{lim_str} 字元</span>
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -546,30 +574,41 @@ def render_card(strategy: str, title: str, limit, reason: str = "",
             f'<div class="msg warn">⚠️ 超過 {limit} 字元上限，請自行刪減後使用。</div>',
             unsafe_allow_html=True)
 
-def render_platform_cards(selected: str):
-    """渲染平台卡片群組，點擊透過按鈕觸發 session_state 更新"""
+# ==========================================
+# 8. 平台卡片渲染（純 st.button 方案）
+# ==========================================
+def render_platform_cards(selected: str, active_color: str):
+    """
+    每個平台用一個 st.button 完整偽裝成卡片。
+    選中的卡片用 st.markdown 包一層 .active-platform div 來套用高亮樣式。
+    按鈕文字用換行符組成多行卡片內容。
+    """
     platforms = list(PLATFORM_CONFIG.items())
     cols = st.columns(len(platforms))
+
     for col, (name, cfg) in zip(cols, platforms):
+        is_active = (name == selected)
+
+        # 按鈕內容：emoji + 名稱 + 描述 + 選中勾
+        check = "✓  已選取" if is_active else ""
+        label = f"{cfg['emoji']}\n{cfg['short']}\n{cfg['desc']}\n{check}"
+
         with col:
-            is_active = (name == selected)
-            active_cls = "active" if is_active else ""
-            # 卡片 HTML（純展示）
-            st.markdown(f"""
-<div class="platform-card {active_cls}">
-  <span class="pc-emoji">{cfg['emoji']}</span>
-  <span class="pc-name">{cfg['short']}</span>
-  <span class="pc-desc">{cfg['desc']}</span>
-  <span class="pc-check">✓</span>
-</div>""", unsafe_allow_html=True)
-            # 對應的觸發按鈕（在卡片下方，透過 CSS 覆蓋讓它幾乎隱形，點卡片旁邊即可）
-            btn_label = f"{'✓ ' if is_active else ''}{cfg['short']}"
-            if st.button(btn_label, key=f"pbtn_{name}", use_container_width=True):
-                select_platform(name)
+            # 選中的卡片包一層 active-platform，CSS 藉此套用高亮
+            if is_active:
+                st.markdown('<div class="active-platform">', unsafe_allow_html=True)
+
+            clicked = st.button(label, key=f"pbtn_{name}", use_container_width=True)
+
+            if is_active:
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            if clicked and not is_active:
+                st.session_state.sel_platform = name
                 st.rerun()
 
 # ==========================================
-# 8. 頁面主體
+# 9. 頁面主體
 # ==========================================
 st.set_page_config(
     page_title="馬尼通訊 | 雙軌標題引擎",
@@ -585,6 +624,7 @@ if cur not in PLATFORM_CONFIG:
 cfg = PLATFORM_CONFIG[cur]
 pc  = cfg["color"]
 pd  = cfg["color_dim"]
+lim = cfg["limit"]
 
 inject_css(pc, pd)
 
@@ -596,12 +636,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── 平台卡片選擇（form 外，即時切換）──
+# ── 平台卡片（form 外，即時切換）──
 st.markdown(
     '<div class="sec-label"><span class="sec-dot"></span>選擇目標平台</div>',
     unsafe_allow_html=True,
 )
-render_platform_cards(cur)
+render_platform_cards(cur, pc)
 
 # Momo 促銷警示
 if cur == "Momo 購物網":
@@ -619,17 +659,15 @@ st.selectbox(
 )
 
 defaults = PLATFORM_DEFAULTS.get(cur, PLATFORM_DEFAULTS["Shopee 蝦皮"])
-lim = cfg["limit"]
 
 # ==========================================
-# 9. 表單
+# 10. 表單
 # ==========================================
 with st.form("title_form"):
     st.markdown(
         '<div class="sec-label"><span class="sec-dot"></span>步驟一：基本商品資訊（必填）</div>',
         unsafe_allow_html=True,
     )
-
     col1, col2 = st.columns(2)
     with col1:
         brand_name = st.text_input("品牌名稱", key="f_brand",
@@ -675,7 +713,7 @@ with st.form("title_form"):
     submitted = st.form_submit_button("🚀 執行產出", use_container_width=True)
 
 # ==========================================
-# 10. 執行邏輯
+# 11. 執行邏輯
 # ==========================================
 if submitted:
     all_input = f"{brand_name} {product_model} {key_specs_str} {promo_text} {selling_points}"
@@ -726,12 +764,11 @@ if submitted:
         st.session_state.has_run = True
 
 # ==========================================
-# 11. 畫面渲染
+# 12. 畫面渲染
 # ==========================================
 if st.session_state.has_run:
     st.markdown("---")
 
-    # 規則標題
     st.markdown(
         '<div class="sec-label"><span class="sec-dot"></span>規則標題（定量保證、絕對合規）</div>',
         unsafe_allow_html=True,
@@ -742,12 +779,14 @@ if st.session_state.has_run:
     elif isinstance(rule_res, dict) and "Error" in rule_res:
         st.markdown(f'<div class="msg error">{rule_res["Error"]}</div>', unsafe_allow_html=True)
     else:
-        for i, (strategy, title) in enumerate(rule_res.items()):
-            render_card(strategy, title, lim, key_suffix=f"rule_{i}")
+        with st.container():
+            st.markdown('<div class="result-area">', unsafe_allow_html=True)
+            for i, (strategy, title) in enumerate(rule_res.items()):
+                render_card(strategy, title, lim, key_suffix=f"rule_{i}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # AI 建議
     st.markdown(
         '<div class="sec-label"><span class="sec-dot purple"></span>AI 建議方案（發散創意、精準打擊）</div>',
         unsafe_allow_html=True,
@@ -765,23 +804,27 @@ if st.session_state.has_run:
                     '<div class="msg info">💡 請至 Streamlit Cloud → App Settings → Secrets 設定 GEMINI_API_KEY。</div>',
                     unsafe_allow_html=True)
         elif isinstance(ai_res, list):
-            for i, opt in enumerate(ai_res):
-                title_text  = opt.get("title", "")
-                reason_text = opt.get("reason", "")
-                if "⚠️" in title_text:
-                    st.markdown(
-                        f'<div class="msg error">{title_text}<br>'
-                        f'<small>攔截原因：{reason_text}</small></div>',
-                        unsafe_allow_html=True)
-                else:
-                    render_card(f"🔮 AI 創意方案 {i+1}", title_text, lim,
-                                reason=reason_text, is_ai=True, key_suffix=f"ai_{i}")
+            with st.container():
+                st.markdown('<div class="result-area">', unsafe_allow_html=True)
+                for i, opt in enumerate(ai_res):
+                    title_text  = opt.get("title", "")
+                    reason_text = opt.get("reason", "")
+                    if "⚠️" in title_text:
+                        st.markdown(
+                            f'<div class="msg error">{title_text}<br>'
+                            f'<small>攔截原因：{reason_text}</small></div>',
+                            unsafe_allow_html=True)
+                    else:
+                        render_card(f"🔮 AI 創意方案 {i+1}", title_text, lim,
+                                    reason=reason_text, is_ai=True, key_suffix=f"ai_{i}")
+                st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# [漣漪檢查 - Ripple Check] V1.8
-# 1. 新增平台：只需在 PLATFORM_CONFIG 加一筆 dict，卡片與邏輯自動擴充。
-#    若新平台有專屬規則引擎，需在 generate_titles_by_platform() 加 elif。
-#    若新平台有 AI 規則說明，需在 get_gemini_suggestions() 的 rules dict 加一筆。
-# 2. platform_cards 透過 st.button + st.rerun() 實作即時切換，不依賴 form。
-# 3. render_card() 的 key_suffix 需全頁唯一，避免 DuplicateWidgetID 錯誤。
+# [漣漪檢查 - Ripple Check] V1.9
+# 1. 新增平台：PLATFORM_CONFIG 加一筆即可，卡片自動擴充。
+#    - 需同步補 PLATFORM_DEFAULTS、generate_titles_by_platform() elif、
+#      get_gemini_suggestions() rules dict。
+# 2. 平台卡片按鈕的 min-height:110px 與 stFormSubmitButton 衝突，
+#    已在 CSS 中用 .stFormSubmitButton > button 覆蓋 min-height:unset。
+# 3. render_card() key_suffix 全頁需唯一，否則報 DuplicateWidgetID。
 # ==========================================
